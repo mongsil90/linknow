@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LinkNow MVP</title>
+    <style>
+      :root {
+        --bg: #0f172a;
+        --card: #111827;
+        --muted: #94a3b8;
+        --text: #e2e8f0;
+        --accent: #22c55e;
+        --accent-2: #38bdf8;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Arial, sans-serif;
+        background: radial-gradient(circle at 10% 10%, #1e293b, #0f172a 60%);
+        color: var(--text);
+      }
+      .app {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 16px;
+        padding: 24px;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      header h1 { margin: 0; font-size: 24px; }
+      header .tag { color: var(--muted); font-size: 14px; }
+      .grid {
+        display: grid;
+        grid-template-columns: 1.2fr 1fr;
+        gap: 16px;
+      }
+      .card {
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 16px;
+        padding: 16px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+      }
+      .card h2 { margin: 0 0 12px; font-size: 18px; }
+      label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+      input, textarea, select {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: #0b1220;
+        color: var(--text);
+      }
+      textarea { min-height: 70px; resize: vertical; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .btn {
+        border: 0;
+        padding: 10px 12px;
+        border-radius: 10px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .btn.primary { background: var(--accent); color: #052e12; }
+      .btn.secondary { background: #1e293b; color: var(--text); }
+      .btn.ghost { background: transparent; color: var(--muted); border: 1px solid rgba(148, 163, 184, 0.3); }
+      .btn.small { padding: 6px 8px; font-size: 12px; }
+      .links { display: grid; gap: 10px; }
+      .link-item { display: grid; gap: 8px; padding: 10px; border-radius: 12px; background: #0b1220; border: 1px solid rgba(148, 163, 184, 0.2); }
+      .link-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+      .preview {
+        background: linear-gradient(180deg, #0b1220, #111827);
+        border-radius: 18px;
+        padding: 18px;
+        display: grid;
+        gap: 12px;
+        min-height: 540px;
+      }
+      .profile {
+        display: grid;
+        gap: 6px;
+        text-align: center;
+      }
+      .avatar {
+        width: 96px;
+        height: 96px;
+        border-radius: 50%;
+        margin: 0 auto;
+        background: #1f2937;
+        display: grid;
+        place-items: center;
+        font-weight: 700;
+        color: var(--accent-2);
+      }
+      .public-links { display: grid; gap: 10px; }
+      .public-links a {
+        text-decoration: none;
+        background: #0b1220;
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        color: var(--text);
+        transition: transform 0.15s ease, border 0.15s ease;
+      }
+      .public-links a:hover { transform: translateY(-2px); border-color: var(--accent-2); }
+      .muted { color: var(--muted); font-size: 12px; }
+      .footer { margin-top: auto; text-align: center; color: var(--muted); font-size: 12px; }
+      @media (max-width: 900px) {
+        .grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+      const { useState, useEffect, useMemo } = React;
+
+      const STORAGE_KEY = "linknow_mvp";
+
+      const defaultState = {
+        username: "linknow",
+        displayName: "LinkNow",
+        bio: "Share everything you do with one simple page.",
+        avatarText: "LN",
+        theme: "night",
+        links: [
+          { id: "l1", title: "Portfolio", url: "https://example.com", active: true },
+          { id: "l2", title: "YouTube", url: "https://youtube.com", active: true },
+          { id: "l3", title: "Newsletter", url: "https://example.com/news", active: false }
+        ]
+      };
+
+      function loadState() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          return raw ? { ...defaultState, ...JSON.parse(raw) } : defaultState;
+        } catch (err) {
+          return defaultState;
+        }
+      }
+
+      function saveState(state) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      }
+
+      function useQuery() {
+        return useMemo(() => new URLSearchParams(window.location.search), []);
+      }
+
+      function App() {
+        const [state, setState] = useState(loadState);
+        const [newTitle, setNewTitle] = useState("");
+        const [newUrl, setNewUrl] = useState("");
+        const query = useQuery();
+        const isPublic = query.get("public") === "1";
+
+        useEffect(() => {
+          saveState(state);
+        }, [state]);
+
+        const activeLinks = state.links.filter((link) => link.active);
+
+        function updateField(field, value) {
+          setState((prev) => ({ ...prev, [field]: value }));
+        }
+
+        function addLink() {
+          if (!newTitle.trim() || !newUrl.trim()) return;
+          const id = `l${Date.now()}`;
+          setState((prev) => ({
+            ...prev,
+            links: [...prev.links, { id, title: newTitle.trim(), url: newUrl.trim(), active: true }]
+          }));
+          setNewTitle("");
+          setNewUrl("");
+        }
+
+        function removeLink(id) {
+          setState((prev) => ({ ...prev, links: prev.links.filter((link) => link.id !== id) }));
+        }
+
+        function moveLink(id, direction) {
+          setState((prev) => {
+            const idx = prev.links.findIndex((link) => link.id === id);
+            if (idx < 0) return prev;
+            const nextIdx = direction === "up" ? idx - 1 : idx + 1;
+            if (nextIdx < 0 || nextIdx >= prev.links.length) return prev;
+            const updated = [...prev.links];
+            const temp = updated[idx];
+            updated[idx] = updated[nextIdx];
+            updated[nextIdx] = temp;
+            return { ...prev, links: updated };
+          });
+        }
+
+        function toggleActive(id) {
+          setState((prev) => ({
+            ...prev,
+            links: prev.links.map((link) =>
+              link.id === id ? { ...link, active: !link.active } : link
+            )
+          }));
+        }
+
+        function copyPublicLink() {
+          const url = `${window.location.origin}${window.location.pathname}?public=1`;
+          navigator.clipboard.writeText(url).catch(() => {});
+          alert("Public link copied!");
+        }
+
+        const themeStyles = state.theme === "mint" ? {
+          background: "linear-gradient(180deg, #0f766e, #0f172a)",
+          accent: "#34d399"
+        } : state.theme === "sunset" ? {
+          background: "linear-gradient(180deg, #fb7185, #0f172a)",
+          accent: "#fbbf24"
+        } : {
+          background: "linear-gradient(180deg, #0b1220, #111827)",
+          accent: "#38bdf8"
+        };
+
+        return (
+          <div className="app">
+            <header>
+              <div>
+                <h1>LinkNow MVP</h1>
+                <div className="tag">Link in Bio builder for fast launch</div>
+              </div>
+              {!isPublic && (
+                <button className="btn ghost" onClick={copyPublicLink}>
+                  Copy public link
+                </button>
+              )}
+            </header>
+
+            <div className="grid">
+              {!isPublic && (
+                <div className="card">
+                  <h2>Profile</h2>
+                  <div className="row">
+                    <div>
+                      <label>Username</label>
+                      <input value={state.username} onChange={(e) => updateField("username", e.target.value)} />
+                    </div>
+                    <div>
+                      <label>Display name</label>
+                      <input value={state.displayName} onChange={(e) => updateField("displayName", e.target.value)} />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 10 }}>
+                    <label>Bio</label>
+                    <textarea value={state.bio} onChange={(e) => updateField("bio", e.target.value)} />
+                  </div>
+                  <div className="row" style={{ marginTop: 10 }}>
+                    <div>
+                      <label>Avatar text</label>
+                      <input value={state.avatarText} onChange={(e) => updateField("avatarText", e.target.value)} />
+                    </div>
+                    <div>
+                      <label>Theme</label>
+                      <select value={state.theme} onChange={(e) => updateField("theme", e.target.value)}>
+                        <option value="night">Night</option>
+                        <option value="mint">Mint</option>
+                        <option value="sunset">Sunset</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 18 }}>
+                    <h2>Links</h2>
+                    <div className="row" style={{ marginBottom: 10 }}>
+                      <div>
+                        <label>Title</label>
+                        <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
+                      </div>
+                      <div>
+                        <label>URL</label>
+                        <input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} />
+                      </div>
+                    </div>
+                    <button className="btn primary" onClick={addLink}>Add link</button>
+                  </div>
+
+                  <div className="links" style={{ marginTop: 12 }}>
+                    {state.links.map((link, idx) => (
+                      <div className="link-item" key={link.id}>
+                        <div><strong>{link.title}</strong></div>
+                        <div className="muted">{link.url}</div>
+                        <div className="link-actions">
+                          <button className="btn small secondary" onClick={() => moveLink(link.id, "up")} disabled={idx === 0}>Up</button>
+                          <button className="btn small secondary" onClick={() => moveLink(link.id, "down")} disabled={idx === state.links.length - 1}>Down</button>
+                          <button className="btn small ghost" onClick={() => toggleActive(link.id)}>
+                            {link.active ? "Hide" : "Show"}
+                          </button>
+                          <button className="btn small" style={{ background: "#ef4444", color: "white" }} onClick={() => removeLink(link.id)}>
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="card">
+                <h2>Preview</h2>
+                <div className="preview" style={{ background: themeStyles.background }}>
+                  <div className="profile">
+                    <div className="avatar">{state.avatarText || "?"}</div>
+                    <h3>{state.displayName || "Your Name"}</h3>
+                    <div className="muted">@{state.username || "username"}</div>
+                    <p>{state.bio || "Write a short bio here."}</p>
+                  </div>
+                  <div className="public-links">
+                    {activeLinks.length === 0 && <div className="muted">No links yet.</div>}
+                    {activeLinks.map((link) => (
+                      <a key={link.id} href={link.url} target="_blank" rel="noreferrer">
+                        {link.title}
+                      </a>
+                    ))}
+                  </div>
+                  <div className="footer">Powered by LinkNow MVP</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>
