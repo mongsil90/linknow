@@ -31,9 +31,12 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
       }
       header h1 { margin: 0; font-size: 24px; }
       header .tag { color: var(--muted); font-size: 14px; }
+      .header-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
       .grid {
         display: grid;
         grid-template-columns: 1.2fr 1fr;
@@ -109,6 +112,25 @@
       .public-links a:hover { transform: translateY(-2px); border-color: var(--accent-2); }
       .muted { color: var(--muted); font-size: 12px; }
       .footer { margin-top: auto; text-align: center; color: var(--muted); font-size: 12px; }
+
+      .public-page {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .public-container {
+        width: min(520px, 100%);
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 18px;
+        padding: 20px;
+        display: grid;
+        gap: 12px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+      }
+      .public-footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
+
       @media (max-width: 900px) {
         .grid { grid-template-columns: 1fr; }
       }
@@ -122,7 +144,7 @@
     <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <script type="text/babel">
-      const { useState, useEffect, useMemo } = React;
+      const { useState, useEffect, useMemo, useRef } = React;
 
       const STORAGE_KEY = "linknow_mvp";
 
@@ -156,10 +178,50 @@
         return useMemo(() => new URLSearchParams(window.location.search), []);
       }
 
+      function normalizeUrl(input) {
+        const raw = String(input || "").trim();
+        if (!raw) return { ok: false, message: "URL is required." };
+        let value = raw;
+        if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value)) {
+          value = `https://${value}`;
+        }
+        try {
+          const url = new URL(value);
+          const protocol = url.protocol.toLowerCase();
+          if (protocol === "javascript:" || protocol === "data:") {
+            return { ok: false, message: "Blocked URL scheme." };
+          }
+          if (protocol !== "http:" && protocol !== "https:") {
+            return { ok: false, message: "Only http/https URLs are allowed." };
+          }
+          return { ok: true, url: url.toString() };
+        } catch (err) {
+          return { ok: false, message: "Invalid URL format." };
+        }
+      }
+
+      function sanitizeLinks(links) {
+        if (!Array.isArray(links)) return [];
+        const base = Date.now();
+        return links.map((link, idx) => {
+          if (!link) return null;
+          const title = String(link.title || `Link ${idx + 1}`).trim();
+          const normalized = normalizeUrl(link.url);
+          if (!normalized.ok) return null;
+          return {
+            id: link.id || `l${base}_${idx}`,
+            title: title || `Link ${idx + 1}`,
+            url: normalized.url,
+            active: link.active !== false
+          };
+        }).filter(Boolean);
+      }
+
       function App() {
         const [state, setState] = useState(loadState);
         const [newTitle, setNewTitle] = useState("");
         const [newUrl, setNewUrl] = useState("");
+        const importRef = useRef(null);
         const query = useQuery();
         const isPublic = query.get("public") === "1";
 
@@ -175,10 +237,15 @@
 
         function addLink() {
           if (!newTitle.trim() || !newUrl.trim()) return;
+          const normalized = normalizeUrl(newUrl);
+          if (!normalized.ok) {
+            alert(normalized.message);
+            return;
+          }
           const id = `l${Date.now()}`;
           setState((prev) => ({
             ...prev,
-            links: [...prev.links, { id, title: newTitle.trim(), url: newUrl.trim(), active: true }]
+            links: [...prev.links, { id, title: newTitle.trim(), url: normalized.url, active: true }]
           }));
           setNewTitle("");
           setNewUrl("");
@@ -217,6 +284,53 @@
           alert("Public link copied!");
         }
 
+        function exportState() {
+          const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `linknow-${state.username || "profile"}.json`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        }
+
+        function handleImportFile(event) {
+          const file = event.target.files && event.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            try {
+              const parsed = JSON.parse(String(reader.result || "{}"));
+              const next = { ...defaultState, ...parsed };
+              next.username = String(next.username || defaultState.username);
+              next.displayName = String(next.displayName || defaultState.displayName);
+              next.bio = String(next.bio || defaultState.bio);
+              next.avatarText = String(next.avatarText || defaultState.avatarText);
+              next.theme = String(next.theme || defaultState.theme);
+              next.links = sanitizeLinks(parsed.links || defaultState.links);
+              setState(next);
+              alert("Import complete!");
+            } catch (err) {
+              alert("Invalid JSON file.");
+            } finally {
+              event.target.value = "";
+            }
+          };
+          reader.readAsText(file);
+        }
+
+        function resetState() {
+          if (!confirm("Reset to default profile? This will overwrite your current data.")) return;
+          localStorage.removeItem(STORAGE_KEY);
+          setState(defaultState);
+        }
+
+        function triggerImport() {
+          if (importRef.current) importRef.current.click();
+        }
+
         const themeStyles = state.theme === "mint" ? {
           background: "linear-gradient(180deg, #0f766e, #0f172a)",
           accent: "#34d399"
@@ -228,6 +342,30 @@
           accent: "#38bdf8"
         };
 
+        if (isPublic) {
+          return (
+            <div className="public-page" style={{ background: themeStyles.background }}>
+              <div className="public-container">
+                <div className="profile">
+                  <div className="avatar">{state.avatarText || "?"}</div>
+                  <h3>{state.displayName || "Your Name"}</h3>
+                  <div className="muted">@{state.username || "username"}</div>
+                  <p>{state.bio || "Write a short bio here."}</p>
+                </div>
+                <div className="public-links">
+                  {activeLinks.length === 0 && <div className="muted">No links yet.</div>}
+                  {activeLinks.map((link) => (
+                    <a key={link.id} href={link.url} target="_blank" rel="noreferrer">
+                      {link.title}
+                    </a>
+                  ))}
+                </div>
+                <div className="public-footer">Made with LinkNow</div>
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div className="app">
             <header>
@@ -235,81 +373,87 @@
                 <h1>LinkNow MVP</h1>
                 <div className="tag">Link in Bio builder for fast launch</div>
               </div>
-              {!isPublic && (
-                <button className="btn ghost" onClick={copyPublicLink}>
-                  Copy public link
-                </button>
-              )}
+              <div className="header-actions">
+                <button className="btn ghost" onClick={exportState}>Export</button>
+                <button className="btn ghost" onClick={triggerImport}>Import</button>
+                <button className="btn ghost" onClick={resetState}>Reset</button>
+                <button className="btn ghost" onClick={copyPublicLink}>Copy public link</button>
+                <input
+                  ref={importRef}
+                  type="file"
+                  accept="application/json"
+                  style={{ display: "none" }}
+                  onChange={handleImportFile}
+                />
+              </div>
             </header>
 
             <div className="grid">
-              {!isPublic && (
-                <div className="card">
-                  <h2>Profile</h2>
-                  <div className="row">
-                    <div>
-                      <label>Username</label>
-                      <input value={state.username} onChange={(e) => updateField("username", e.target.value)} />
-                    </div>
-                    <div>
-                      <label>Display name</label>
-                      <input value={state.displayName} onChange={(e) => updateField("displayName", e.target.value)} />
-                    </div>
+              <div className="card">
+                <h2>Profile</h2>
+                <div className="row">
+                  <div>
+                    <label>Username</label>
+                    <input value={state.username} onChange={(e) => updateField("username", e.target.value)} />
                   </div>
-                  <div style={{ marginTop: 10 }}>
-                    <label>Bio</label>
-                    <textarea value={state.bio} onChange={(e) => updateField("bio", e.target.value)} />
-                  </div>
-                  <div className="row" style={{ marginTop: 10 }}>
-                    <div>
-                      <label>Avatar text</label>
-                      <input value={state.avatarText} onChange={(e) => updateField("avatarText", e.target.value)} />
-                    </div>
-                    <div>
-                      <label>Theme</label>
-                      <select value={state.theme} onChange={(e) => updateField("theme", e.target.value)}>
-                        <option value="night">Night</option>
-                        <option value="mint">Mint</option>
-                        <option value="sunset">Sunset</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: 18 }}>
-                    <h2>Links</h2>
-                    <div className="row" style={{ marginBottom: 10 }}>
-                      <div>
-                        <label>Title</label>
-                        <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
-                      </div>
-                      <div>
-                        <label>URL</label>
-                        <input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} />
-                      </div>
-                    </div>
-                    <button className="btn primary" onClick={addLink}>Add link</button>
-                  </div>
-
-                  <div className="links" style={{ marginTop: 12 }}>
-                    {state.links.map((link, idx) => (
-                      <div className="link-item" key={link.id}>
-                        <div><strong>{link.title}</strong></div>
-                        <div className="muted">{link.url}</div>
-                        <div className="link-actions">
-                          <button className="btn small secondary" onClick={() => moveLink(link.id, "up")} disabled={idx === 0}>Up</button>
-                          <button className="btn small secondary" onClick={() => moveLink(link.id, "down")} disabled={idx === state.links.length - 1}>Down</button>
-                          <button className="btn small ghost" onClick={() => toggleActive(link.id)}>
-                            {link.active ? "Hide" : "Show"}
-                          </button>
-                          <button className="btn small" style={{ background: "#ef4444", color: "white" }} onClick={() => removeLink(link.id)}>
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                  <div>
+                    <label>Display name</label>
+                    <input value={state.displayName} onChange={(e) => updateField("displayName", e.target.value)} />
                   </div>
                 </div>
-              )}
+                <div style={{ marginTop: 10 }}>
+                  <label>Bio</label>
+                  <textarea value={state.bio} onChange={(e) => updateField("bio", e.target.value)} />
+                </div>
+                <div className="row" style={{ marginTop: 10 }}>
+                  <div>
+                    <label>Avatar text</label>
+                    <input value={state.avatarText} onChange={(e) => updateField("avatarText", e.target.value)} />
+                  </div>
+                  <div>
+                    <label>Theme</label>
+                    <select value={state.theme} onChange={(e) => updateField("theme", e.target.value)}>
+                      <option value="night">Night</option>
+                      <option value="mint">Mint</option>
+                      <option value="sunset">Sunset</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 18 }}>
+                  <h2>Links</h2>
+                  <div className="row" style={{ marginBottom: 10 }}>
+                    <div>
+                      <label>Title</label>
+                      <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
+                    </div>
+                    <div>
+                      <label>URL</label>
+                      <input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} />
+                    </div>
+                  </div>
+                  <button className="btn primary" onClick={addLink}>Add link</button>
+                </div>
+
+                <div className="links" style={{ marginTop: 12 }}>
+                  {state.links.map((link, idx) => (
+                    <div className="link-item" key={link.id}>
+                      <div><strong>{link.title}</strong></div>
+                      <div className="muted">{link.url}</div>
+                      <div className="link-actions">
+                        <button className="btn small secondary" onClick={() => moveLink(link.id, "up")} disabled={idx === 0}>Up</button>
+                        <button className="btn small secondary" onClick={() => moveLink(link.id, "down")} disabled={idx === state.links.length - 1}>Down</button>
+                        <button className="btn small ghost" onClick={() => toggleActive(link.id)}>
+                          {link.active ? "Hide" : "Show"}
+                        </button>
+                        <button className="btn small" style={{ background: "#ef4444", color: "white" }} onClick={() => removeLink(link.id)}>
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
               <div className="card">
                 <h2>Preview</h2>
