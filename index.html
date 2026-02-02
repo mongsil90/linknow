@@ -163,7 +163,7 @@
       const { useState, useEffect, useMemo, useRef } = React;
 
       const STORAGE_KEY = "linknow_mvp";
-      const ADMIN_KEY = "DEV_KEY";
+      const ADMIN_KEY = "";
 
       const defaultState = {
         username: "linknow",
@@ -235,28 +235,44 @@
       }
 
       function App() {
-        const [state, setState] = useState(loadState);
+        const query = useQuery();
+        const pathMatch = useMemo(() => window.location.pathname.match(/^\/u\/([^\/]+)/), []);
+        const pathUsername = pathMatch ? decodeURIComponent(pathMatch[1]) : "";
+        const queryUsername = (query.get("u") || "").trim();
+        const publicUsername = (pathUsername || queryUsername).trim().toLowerCase();
+        const isPublic = Boolean(pathUsername) || query.get("public") === "1";
+        const [state, setState] = useState(() => (isPublic ? { ...defaultState } : loadState()));
         const [newTitle, setNewTitle] = useState("");
         const [newUrl, setNewUrl] = useState("");
         const [isSaving, setIsSaving] = useState(false);
         const [isLoading, setIsLoading] = useState(false);
         const [loadError, setLoadError] = useState("");
         const importRef = useRef(null);
-        const query = useQuery();
-        const isPublic = query.get("public") === "1";
-        const usernameParam = (query.get("u") || "").trim().toLowerCase();
 
         useEffect(() => {
+          if (isPublic) return;
           saveState(state);
-        }, [state]);
+        }, [state, isPublic]);
 
         useEffect(() => {
-          if (!usernameParam) return;
+          if (!isPublic) return;
+          if (!publicUsername) {
+            setIsLoading(false);
+            setLoadError("Username is missing.");
+            return;
+          }
           let cancelled = false;
           setIsLoading(true);
           setLoadError("");
-          fetch(`/api/page/${encodeURIComponent(usernameParam)}`)
-            .then((res) => res.ok ? res.json() : Promise.reject(res))
+          fetch(`/api/page/${encodeURIComponent(publicUsername)}`)
+            .then((res) => {
+              if (res.status === 404) {
+                const err = new Error("not-found");
+                err.status = 404;
+                throw err;
+              }
+              return res.ok ? res.json() : Promise.reject(res);
+            })
             .then((json) => {
               if (cancelled) return;
               if (!json || !json.ok || !json.data) {
@@ -266,10 +282,10 @@
               }
               const profile = json.data.profile || {};
               const links = Array.isArray(json.data.links) ? json.data.links : [];
-              setState((prev) => ({
-                ...prev,
-                username: profile.username || prev.username,
-                displayName: profile.display_name || prev.displayName,
+              setState({
+                ...defaultState,
+                username: profile.username || publicUsername,
+                displayName: profile.display_name || "",
                 bio: profile.bio || "",
                 avatarText: profile.avatar_text || "",
                 theme: profile.theme || "night",
@@ -279,16 +295,16 @@
                   url: link.url || "",
                   active: link.active !== false
                 }))
-              }));
+              });
               setIsLoading(false);
             })
-            .catch(() => {
+            .catch((err) => {
               if (cancelled) return;
-              setLoadError("Failed to load profile.");
+              setLoadError(err && err.status === 404 ? "Profile not found." : "Failed to load profile.");
               setIsLoading(false);
             });
           return () => { cancelled = true; };
-        }, [usernameParam]);
+        }, [isPublic, publicUsername]);
 
         const activeLinks = state.links.filter((link) => link.active);
 
