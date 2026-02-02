@@ -135,7 +135,7 @@
         .grid { grid-template-columns: 1fr; }
       }
     </style>
-      <!-- Google tag (gtag.js) -->
+    <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-VK7HSKL61D"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -143,13 +143,15 @@
       gtag('js', new Date());
 
       gtag('config', 'G-VK7HSKL61D');
-    </script>      <script type="text/javascript">
-        (function(c,l,a,r,i,t,y){
-            c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
-            t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
-            y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
-        })(window, document, "clarity", "script", "vatds94hzr");
-    </script>  </head>
+    </script>
+    <script type="text/javascript">
+      (function(c,l,a,r,i,t,y){
+        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+      })(window, document, "clarity", "script", "vatds94hzr");
+    </script>
+  </head>
   <body>
     <div id="root"></div>
 
@@ -161,6 +163,7 @@
       const { useState, useEffect, useMemo, useRef } = React;
 
       const STORAGE_KEY = "linknow_mvp";
+      const ADMIN_KEY = "DEV_KEY";
 
       const defaultState = {
         username: "linknow",
@@ -235,13 +238,57 @@
         const [state, setState] = useState(loadState);
         const [newTitle, setNewTitle] = useState("");
         const [newUrl, setNewUrl] = useState("");
+        const [isSaving, setIsSaving] = useState(false);
+        const [isLoading, setIsLoading] = useState(false);
+        const [loadError, setLoadError] = useState("");
         const importRef = useRef(null);
         const query = useQuery();
         const isPublic = query.get("public") === "1";
+        const usernameParam = (query.get("u") || "").trim().toLowerCase();
 
         useEffect(() => {
           saveState(state);
         }, [state]);
+
+        useEffect(() => {
+          if (!usernameParam) return;
+          let cancelled = false;
+          setIsLoading(true);
+          setLoadError("");
+          fetch(`/api/page/${encodeURIComponent(usernameParam)}`)
+            .then((res) => res.ok ? res.json() : Promise.reject(res))
+            .then((json) => {
+              if (cancelled) return;
+              if (!json || !json.ok || !json.data) {
+                setLoadError("Profile not found.");
+                setIsLoading(false);
+                return;
+              }
+              const profile = json.data.profile || {};
+              const links = Array.isArray(json.data.links) ? json.data.links : [];
+              setState((prev) => ({
+                ...prev,
+                username: profile.username || prev.username,
+                displayName: profile.display_name || prev.displayName,
+                bio: profile.bio || "",
+                avatarText: profile.avatar_text || "",
+                theme: profile.theme || "night",
+                links: links.map((link, idx) => ({
+                  id: link.id || `l${Date.now()}_${idx}`,
+                  title: link.title || `Link ${idx + 1}`,
+                  url: link.url || "",
+                  active: link.active !== false
+                }))
+              }));
+              setIsLoading(false);
+            })
+            .catch(() => {
+              if (cancelled) return;
+              setLoadError("Failed to load profile.");
+              setIsLoading(false);
+            });
+          return () => { cancelled = true; };
+        }, [usernameParam]);
 
         const activeLinks = state.links.filter((link) => link.active);
 
@@ -293,9 +340,36 @@
         }
 
         function copyPublicLink() {
-          const url = `${window.location.origin}${window.location.pathname}?public=1`;
+          const userSlug = (state.username || "").trim();
+          const url = userSlug
+            ? `${window.location.origin}/u/${userSlug}`
+            : `${window.location.origin}${window.location.pathname}?public=1`;
           navigator.clipboard.writeText(url).catch(() => {});
           alert("Public link copied!");
+        }
+
+        async function saveToServer() {
+          if (isSaving) return;
+          setIsSaving(true);
+          try {
+            const res = await fetch("/api/save", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-admin-key": ADMIN_KEY
+              },
+              body: JSON.stringify(state)
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || !json.ok) {
+              throw new Error(json.error || "Save failed");
+            }
+            alert("Saved to server!");
+          } catch (err) {
+            alert(err.message || "Save failed");
+          } finally {
+            setIsSaving(false);
+          }
         }
 
         function exportState() {
@@ -345,6 +419,16 @@
           if (importRef.current) importRef.current.click();
         }
 
+        function logClick(linkId) {
+          if (!state.username) return;
+          fetch("/api/click", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ username: state.username, link_id: linkId }),
+            keepalive: true
+          }).catch(() => {});
+        }
+
         const themeStyles = state.theme === "mint" ? {
           background: "linear-gradient(180deg, #0f766e, #0f172a)",
           accent: "#34d399"
@@ -360,20 +444,26 @@
           return (
             <div className="public-page" style={{ background: themeStyles.background }}>
               <div className="public-container">
-                <div className="profile">
-                  <div className="avatar">{state.avatarText || "?"}</div>
-                  <h3>{state.displayName || "Your Name"}</h3>
-                  <div className="muted">@{state.username || "username"}</div>
-                  <p>{state.bio || "Write a short bio here."}</p>
-                </div>
-                <div className="public-links">
-                  {activeLinks.length === 0 && <div className="muted">No links yet.</div>}
-                  {activeLinks.map((link) => (
-                    <a key={link.id} href={link.url} target="_blank" rel="noreferrer">
-                      {link.title}
-                    </a>
-                  ))}
-                </div>
+                {isLoading && <div className="muted">Loading profile...</div>}
+                {loadError && <div className="muted">{loadError}</div>}
+                {!isLoading && !loadError && (
+                  <>
+                    <div className="profile">
+                      <div className="avatar">{state.avatarText || "?"}</div>
+                      <h3>{state.displayName || "Your Name"}</h3>
+                      <div className="muted">@{state.username || "username"}</div>
+                      <p>{state.bio || "Write a short bio here."}</p>
+                    </div>
+                    <div className="public-links">
+                      {activeLinks.length === 0 && <div className="muted">No links yet.</div>}
+                      {activeLinks.map((link) => (
+                        <a key={link.id} href={link.url} target="_blank" rel="noreferrer" onClick={() => logClick(link.id)}>
+                          {link.title}
+                        </a>
+                      ))}
+                    </div>
+                  </>
+                )}
                 <div className="public-footer">Made with LinkNow</div>
               </div>
             </div>
@@ -388,6 +478,9 @@
                 <div className="tag">Link in Bio builder for fast launch</div>
               </div>
               <div className="header-actions">
+                <button className="btn ghost" onClick={saveToServer} disabled={isSaving}>
+                  {isSaving ? "Saving..." : "Save to server"}
+                </button>
                 <button className="btn ghost" onClick={exportState}>Export</button>
                 <button className="btn ghost" onClick={triggerImport}>Import</button>
                 <button className="btn ghost" onClick={resetState}>Reset</button>
@@ -498,5 +591,3 @@
     </script>
   </body>
 </html>
-
-
