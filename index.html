@@ -236,7 +236,7 @@
 
       function App() {
         const query = useQuery();
-        const pathMatch = useMemo(() => window.location.pathname.match(/^\/u\/([^\/]+)/), []);
+        const pathMatch = window.location.pathname.match(/^\/u\/([^\/]+)/);
         const pathUsername = pathMatch ? decodeURIComponent(pathMatch[1]) : "";
         const queryUsername = (query.get("u") || "").trim();
         const publicUsername = (pathUsername || queryUsername).trim().toLowerCase();
